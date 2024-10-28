@@ -8,46 +8,62 @@ import Random
 type alias Photo =
     { url : String}
 type alias Model =
-    { photos : List Photo
-    , selectedUrl : String
+    {
+      status : Status
     , chosenSize : ThumbnailSize}
 type Msg
     = ClickedPhoto String
     | GotSelectedIndex Int
     | ClickedSize ThumbnailSize
     | ClickedSurpriseMe
+    | GotRandomPhoto Photo
 
 type ThumbnailSize
     = Small
     | Medium
     | Large
+type Status
+    = Loading
+    | Loaded (List Photo) String
+    | Errored String
 view : Model -> Html Msg
 view model =
-    div [ class "content" ]
-        [ h1 [] [ text "Photo Groove" ]
+    div [ class "content" ] <|
+        case model.status of
+             Loaded photos url ->
+                 viewLoaded photos url model.chosenSize
+             Loading ->
+                 []
+             Errored errorMessage ->
+                 [ text ("Error: " ++ errorMessage)]
+
+
+viewLoaded : List Photo -> String -> ThumbnailSize -> List (Html Msg)
+viewLoaded photos url chosenSize =
+    [ h1 [] [ text "Photo Groove" ]
         , button
             [ onClick ClickedSurpriseMe ]
             [ text "Surprise me"]
         , h3 [] [ text "Thumbnail Size:"]
         , div [ id "choose-size"]
             (List.map viewSizeChooser [Small, Medium, Large])
-        , div [ id "thumbnails" , class (sizeToString model.chosenSize)]
+        , div [ id "thumbnails" , class (sizeToString chosenSize)]
             (List.map
-                 (viewThumbnail model.selectedUrl)
-                 model.photos
+                 (viewThumbnail url)
+                 photos
             )
         , img
             [class "large"
-            , src (urlPrefix ++ "large/" ++ model.selectedUrl)
+            , src (urlPrefix ++ "large/" ++ url)
             ]
             []
-        ]
+    ]
 viewThumbnail : String -> Photo -> Html Msg
-viewThumbnail selectedUrl thumb =
+viewThumbnail url thumb =
        img
        [
         src (urlPrefix ++ thumb.url)
-        , classList [("selected", selectedUrl == thumb.url)]
+        , classList [("selected", url == thumb.url)]
         , onClick (ClickedPhoto thumb.url)
        ]
        []
@@ -67,45 +83,64 @@ sizeToString size =
             "med"
         Large ->
             "large"
+selectedUrl : String -> Status -> Status
+selectedUrl url status =
+    case status of
+        Loaded photos _ ->
+            Loaded photos url
+        Loading ->
+            status
+        Errored _ ->
+            status
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
     case msg of
     ClickedPhoto url ->
-        ({ model | selectedUrl = url }, Cmd.none)
+        ({ model | status = selectedUrl url model.status }, Cmd.none)
     ClickedSurpriseMe ->
-        ( model, Random.generate GotSelectedIndex randomPhotoPicker)
+        case model.status of
+            Loaded (firstPhoto :: otherPhotos) _ ->
+                Random.uniform firstPhoto otherPhotos
+                    |> Random.generate GotRandomPhoto
+                    |> Tuple.pair model
+            Loaded [] _ ->
+                (model, Cmd.none)
+            Loading ->
+                (model, Cmd.none)
+            Errored _ ->
+                (model, Cmd.none)
     ClickedSize size ->
         ({ model | chosenSize = size}, Cmd.none)
     GotSelectedIndex index ->
-        ({ model | selectedUrl = getPhotoUrl index }, Cmd.none)
-
+        ({ model | status = selectedUrl (getPhotoUrl index model.status) model.status }, Cmd.none)
+    GotRandomPhoto photo ->
+        ({ model | status = selectedUrl photo.url model.status}, Cmd.none)
 initModel: Model
 initModel =
     {
-    photos =
-        [ {url = "1.jpeg"}
-        , {url = "2.jpeg"}
-        , {url = "3.jpeg"}
-        ]
-    , selectedUrl = "1.jpeg"
+      status = Loading
     , chosenSize = Large
     }
-photoArray: Array Photo
-photoArray = Array.fromList initModel.photos
-
-urlPrefix : String
-urlPrefix =
-    "http://elm-in-action.com/"
-getPhotoUrl : Int -> String
-getPhotoUrl index =
-    case Array.get index photoArray of
+photoArray : Status -> Array Photo
+photoArray status =
+    case status of
+        Loaded photos _ ->
+            Array.fromList photos
+        Loading ->
+            Array.empty
+        Errored _ ->
+            Array.empty
+getPhotoUrl : Int -> Status -> String
+getPhotoUrl index status =
+    case Array.get index (photoArray status) of
         Just photo ->
             photo.url
         Nothing ->
             ""
-randomPhotoPicker : Random.Generator Int
-randomPhotoPicker =
-    Random.int 0 (Array.length photoArray - 1)
+urlPrefix : String
+urlPrefix =
+    "http://elm-in-action.com/"
+
 main : Program () Model Msg
 main =
     Browser.element
