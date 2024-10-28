@@ -1,13 +1,18 @@
 module PhotoGroove exposing (main)
 import Browser
-import Html exposing (Html, div, h1, img, text, button, input, label, h3)
-import Html.Attributes exposing(..)
+import Html exposing (Html, div, h1, img, text, button, input, label, h3, node)
+import Html.Attributes as Attr exposing(class, id, src, title, classList)
 import Html.Events exposing(onClick)
 import Array exposing(Array)
 import Random
 import Http
-import Json.Decode exposing(Decoder, string, int, succeed)
+import Json.Decode as Decode exposing(Decoder, string, int, succeed)
 import Json.Decode.Pipeline exposing(optional, required)
+import Json.Encode as Encode
+import Html.Attributes exposing (type_)
+import Html.Attributes exposing (name)
+import Html.Events exposing(on, onClick)
+
 type alias Photo =
     { url : String
     , size : Int
@@ -16,7 +21,11 @@ type alias Photo =
 type alias Model =
     {
       status : Status
-    , chosenSize : ThumbnailSize}
+    , chosenSize : ThumbnailSize
+    , hue : Int
+    , ripple : Int
+    , noise : Int
+    }
 type Msg
     = ClickedPhoto String
     | GotSelectedIndex Int
@@ -24,7 +33,9 @@ type Msg
     | ClickedSurpriseMe
     | GotRandomPhoto Photo
     | GotPhotos (Result Http.Error (List Photo))
-
+    | SlidHue Int
+    | SlidRipple Int
+    | SlidNoise Int
 type ThumbnailSize
     = Small
     | Medium
@@ -45,23 +56,28 @@ view model =
     div [ class "content" ] <|
         case model.status of
              Loaded photos url ->
-                 viewLoaded photos url model.chosenSize
+                 viewLoaded photos url model
              Loading ->
                  []
              Errored errorMessage ->
                  [ text ("Error: " ++ errorMessage)]
 
 
-viewLoaded : List Photo -> String -> ThumbnailSize -> List (Html Msg)
-viewLoaded photos url chosenSize =
+viewLoaded : List Photo -> String -> Model -> List (Html Msg)
+viewLoaded photos url model =
     [ h1 [] [ text "Photo Groove" ]
         , button
             [ onClick ClickedSurpriseMe ]
             [ text "Surprise me"]
+        , div [ class "filters" ]
+          [ viewFilter SlidHue "Hue" model.hue
+          , viewFilter SlidRipple "Ripple" model.ripple
+          , viewFilter SlidNoise "Noise" model.noise
+          ]
         , h3 [] [ text "Thumbnail Size:"]
         , div [ id "choose-size"]
             (List.map viewSizeChooser [Small, Medium, Large])
-        , div [ id "thumbnails" , class (sizeToString chosenSize)]
+        , div [ id "thumbnails" , class (sizeToString model.chosenSize)]
             (List.map
                  (viewThumbnail url)
                  photos
@@ -138,17 +154,26 @@ update msg model =
                 ({model | status = Errored "0 photos found"}, Cmd.none)
     GotPhotos (Err _) ->
         (model, Cmd.none)
+    SlidHue hue ->
+        ({model | hue = hue}, Cmd.none)
+    SlidRipple ripple ->
+        ({model | ripple = ripple}, Cmd.none)
+    SlidNoise noise ->
+        ({model | noise = noise}, Cmd.none)
 initModel: Model
 initModel =
     {
       status = Loading
     , chosenSize = Large
+    , hue = 5
+    , ripple = 5
+    , noise = 5
     }
 initCmd : Cmd Msg
 initCmd =
     Http.get
         {url = "http://elm-in-action.com/photos/list.json"
-        , expect = Http.expectJson GotPhotos (Json.Decode.list photoDecoder)
+        , expect = Http.expectJson GotPhotos (Decode.list photoDecoder)
         }
 
 photoArray : Status -> Array Photo
@@ -175,7 +200,7 @@ photoDecoder : Decoder Photo
 photoDecoder =
     succeed Photo
         |> Json.Decode.Pipeline.required "url" string
-        |> Json.Decode.Pipeline.required "size" int
+        |> Json.Decode.Pipeline.required "size" Decode.int
         |> optional "title" string "(untitled)"
 
 main : Program () Model Msg
@@ -185,3 +210,23 @@ main =
         , view = view
         , update = update
         , subscriptions = \_ -> Sub.none}
+rangeSlider : List (Html.Attribute msg) -> List (Html msg) -> Html msg
+rangeSlider attributes children =
+    node "range-slider" attributes children
+viewFilter : (Int -> Msg) -> String -> Int -> Html Msg
+viewFilter toMsg name magnitude =
+    div [ class "filter-slider" ]
+        [ label [] [ text name ]
+        , rangeSlider
+            [ Attr.max "11"
+            , Attr.property "val" (Encode.int magnitude)
+            , onSlide toMsg
+            ]
+            []
+        , label [] [ text (String.fromInt magnitude)]
+        ]
+onSlide : (Int -> msg) -> Html.Attribute msg
+onSlide toMsg =
+    Decode.at ["detail", "userSlidTo"] int
+        |> Decode.map toMsg
+        |> on "slide"
