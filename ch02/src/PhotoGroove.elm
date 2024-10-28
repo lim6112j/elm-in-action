@@ -6,8 +6,13 @@ import Html.Events exposing(onClick)
 import Array exposing(Array)
 import Random
 import Http
+import Json.Decode exposing(Decoder, string, int, succeed)
+import Json.Decode.Pipeline exposing(optional, required)
 type alias Photo =
-    { url : String}
+    { url : String
+    , size : Int
+    , title : String
+    }
 type alias Model =
     {
       status : Status
@@ -18,7 +23,7 @@ type Msg
     | ClickedSize ThumbnailSize
     | ClickedSurpriseMe
     | GotRandomPhoto Photo
-    | GotPhotos (Result Http.Error String)
+    | GotPhotos (Result Http.Error (List Photo))
 
 type ThumbnailSize
     = Small
@@ -28,6 +33,13 @@ type Status
     = Loading
     | Loaded (List Photo) String
     | Errored String
+type Error
+    = BadUrl String
+    | Timeout
+    | NetworkError
+    | BadStatus Int
+    | BadBody String
+
 view : Model -> Html Msg
 view model =
     div [ class "content" ] <|
@@ -65,6 +77,7 @@ viewThumbnail url thumb =
        img
        [
         src (urlPrefix ++ thumb.url)
+        , title (thumb.title ++ " [" ++ String.fromInt thumb.size ++ " KB]")
         , classList [("selected", url == thumb.url)]
         , onClick (ClickedPhoto thumb.url)
        ]
@@ -117,14 +130,10 @@ update msg model =
         ({ model | status = selectedUrl (getPhotoUrl index model.status) model.status }, Cmd.none)
     GotRandomPhoto photo ->
         ({ model | status = selectedUrl photo.url model.status}, Cmd.none)
-    GotPhotos (Ok response) ->
-        case String.split "," response of
-            (firstUrl :: _) as urls ->
-                let
-                    photos =
-                        List.map Photo urls
-                in
-                    ({model | status = Loaded photos firstUrl }, Cmd.none)
+    GotPhotos (Ok photos) ->
+        case photos of
+            (first :: _) ->
+                ({model | status = Loaded photos first.url }, Cmd.none)
             [] ->
                 ({model | status = Errored "0 photos found"}, Cmd.none)
     GotPhotos (Err _) ->
@@ -138,8 +147,8 @@ initModel =
 initCmd : Cmd Msg
 initCmd =
     Http.get
-        {url = "http://elm-in-action.com/photos/list"
-        , expect = Http.expectString (\result -> GotPhotos result)
+        {url = "http://elm-in-action.com/photos/list.json"
+        , expect = Http.expectJson GotPhotos (Json.Decode.list photoDecoder)
         }
 
 photoArray : Status -> Array Photo
@@ -162,10 +171,17 @@ urlPrefix : String
 urlPrefix =
     "http://elm-in-action.com/"
 
+photoDecoder : Decoder Photo
+photoDecoder =
+    succeed Photo
+        |> Json.Decode.Pipeline.required "url" string
+        |> Json.Decode.Pipeline.required "size" int
+        |> optional "title" string "(untitled)"
+
 main : Program () Model Msg
 main =
     Browser.element
         { init = \_ -> ( initModel, initCmd)
         , view = view
         , update = update
-        , subscriptions = \model -> Sub.none}
+        , subscriptions = \_ -> Sub.none}
