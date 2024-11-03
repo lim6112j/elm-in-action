@@ -1,4 +1,4 @@
-module PhotoGroove exposing (main)
+port module PhotoGroove exposing (main)
 import Browser
 import Html exposing (Html, div, h1, img, text, button, input, label, h3, node)
 import Html.Attributes as Attr exposing(class, id, src, title, classList)
@@ -12,6 +12,7 @@ import Json.Encode as Encode
 import Html.Attributes exposing (type_)
 import Html.Attributes exposing (name)
 import Html.Events exposing(on, onClick)
+import Html exposing (canvas)
 
 type alias Photo =
     { url : String
@@ -50,7 +51,28 @@ type Error
     | NetworkError
     | BadStatus Int
     | BadBody String
-
+type alias FilterOption =
+    { url: String
+    , filters: List { name: String, amount: Int }
+    }
+port setFilters : FilterOption -> Cmd msg
+applyFilters : Model -> (Model, Cmd Msg)
+applyFilters model =
+    case model.status of
+        Loaded photos aUrl ->
+            let
+                filters =
+                   [ { name = "Hue", amount = model.hue }
+                   , { name = "Ripple", amount = model.ripple}
+                   , { name = "Noise", amount = model.noise}]
+                url =
+                    urlPrefix ++ "large/" ++ aUrl
+            in
+                (model, setFilters {url = url, filters = filters})
+        Loading ->
+            (model, Cmd.none)
+        Errored errorMessage ->
+            (model, Cmd.none)
 view : Model -> Html Msg
 view model =
     div [ class "content" ] <|
@@ -82,10 +104,7 @@ viewLoaded photos url model =
                  (viewThumbnail url)
                  photos
             )
-        , img
-            [class "large"
-            , src (urlPrefix ++ "large/" ++ url)
-            ]
+        , canvas [ id "main-canvas", class "large"]
             []
     ]
 viewThumbnail : String -> Photo -> Html Msg
@@ -126,8 +145,8 @@ selectedUrl url status =
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
     case msg of
-    ClickedPhoto url ->
-        ({ model | status = selectedUrl url model.status }, Cmd.none)
+    ClickedPhoto aUrl ->
+        applyFilters { model | status = selectedUrl aUrl model.status}
     ClickedSurpriseMe ->
         case model.status of
             Loaded (firstPhoto :: otherPhotos) _ ->
@@ -145,7 +164,7 @@ update msg model =
     GotSelectedIndex index ->
         ({ model | status = selectedUrl (getPhotoUrl index model.status) model.status }, Cmd.none)
     GotRandomPhoto photo ->
-        ({ model | status = selectedUrl photo.url model.status}, Cmd.none)
+        applyFilters ({ model | status = selectedUrl photo.url model.status})
     GotPhotos (Ok photos) ->
         case photos of
             (first :: _) ->
